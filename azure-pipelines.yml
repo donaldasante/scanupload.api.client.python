@@ -52,7 +52,9 @@ steps:
   - script: |
       python -m twine upload $(Build.ArtifactStagingDirectory)/python/* -u __token__ -p $(PYPI_API_TOKEN)
     displayName: "Push Python package to PyPI"
-    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/release.'))
+    condition:
+      and(succeeded(), startsWith(variables['Build.SourceBranch'],
+      'refs/tags/release.'))
 
   - script: |
       git config --global user.email "azdo_ci@scanupload.net"
@@ -61,7 +63,9 @@ steps:
 
       git remote add github https://$(GITHUB_PAT)@github.com/donaldasante/scanupload.api.client.python.git || true
 
-      git push github HEAD:refs/heads/main
+      git push github HEAD:refs/heads/main --force
       git push github --tags --force
     displayName: "Mirror repository to GitHub"
-    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/release.'))
+    condition:
+      and(succeeded(), startsWith(variables['Build.SourceBranch'],
+      'refs/tags/release.'))
