@@ -1,0 +1,67 @@
+# Builds and publishes Python package
+
+trigger:
+  tags:
+    include:
+      - release.*
+
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:
+  - group: scanupload-api-client-variables
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+
+  - task: UsePythonVersion@0
+    displayName: "Use Python 3.11"
+    inputs:
+      versionSpec: "3.11"
+
+  - script: |
+      python -m pip install --upgrade pip
+      pip install build twine
+    displayName: "Install Python build tools"
+
+  - script: |
+      pip install -e .[test]
+      pytest --verbose
+    displayName: "Run Python tests"
+
+  # Extract version from the tag name (strip "release." prefix)
+  - script: |
+      TAG_NAME=$BUILD_SOURCEBRANCHNAME
+      VERSION=${TAG_NAME#release.}
+      echo "##vso[task.setvariable variable=PackageVersion]$VERSION"
+    displayName: "Extract version from tag"
+
+  - script: |
+      sed -i "s/^version = .*/version = \"$(PackageVersion)\"/" pyproject.toml
+      python -m build --outdir "$(Build.ArtifactStagingDirectory)/python"
+    displayName: "Build Python package"
+
+  - task: PublishBuildArtifacts@1
+    displayName: "Publish Python package artifact"
+    inputs:
+      PathtoPublish: "$(Build.ArtifactStagingDirectory)/python"
+      ArtifactName: "python-packages"
+      publishLocation: "Container"
+
+  - script: |
+      python -m twine upload $(Build.ArtifactStagingDirectory)/python/* -u __token__ -p $(PYPI_API_TOKEN)
+    displayName: "Push Python package to PyPI"
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/release.'))
+
+  - script: |
+      git config --global user.email "azdo_ci@scanupload.net"
+      git config --global user.name "Azure DevOps CI"
+      git config --global http.postBuffer 524288000
+
+      git remote add github https://$(GITHUB_PAT)@github.com/donaldasante/scanupload.api.client.python.git || true
+
+      git push github HEAD:refs/heads/main
+      git push github --tags --force
+    displayName: "Mirror repository to GitHub"
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/release.'))
