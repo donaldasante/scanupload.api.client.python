@@ -1,4 +1,4 @@
-"""Starlette example with ScanUpload proxy middleware."""
+"""Reusable Starlette example built on the published ScanUpload client package."""
 
 import os
 from contextlib import asynccontextmanager
@@ -19,20 +19,33 @@ from scan_upload_api_client.middleware import ScanUploadProxyMiddleware
 
 
 def _load_dotenv_values() -> dict[str, str]:
-    """Load key/value pairs from project .env file if present."""
-    env_path = Path(__file__).resolve().parents[1] / ".env"
+    """Load key/value pairs from the nearest supported .env file if present."""
     values: dict[str, str] = {}
+    candidate_paths: list[Path] = []
+    override_path = os.getenv("SCANUPLOAD_DOTENV_PATH", "").strip()
 
-    if not env_path.exists():
-        return values
+    if override_path:
+        candidate_paths.append(Path(override_path).expanduser())
 
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    candidate_paths.append(Path.cwd() / ".env")
+    candidate_paths.append(Path(__file__).resolve().parents[1] / ".env")
+
+    seen_paths: set[Path] = set()
+    for env_path in candidate_paths:
+        resolved_path = env_path.resolve()
+        if resolved_path in seen_paths or not resolved_path.exists():
             continue
 
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
+        seen_paths.add(resolved_path)
+        for raw_line in resolved_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+
+        break
 
     return values
 
@@ -50,80 +63,128 @@ def _get_config_value(dotenv_values: dict[str, str], key: str, default: str = ""
     return default
 
 
-dotenv_values = _load_dotenv_values()
-options = ScanUploadProxyOptions(
-    target_base_url=_get_config_value(
-        dotenv_values,
-        "SCANUPLOAD_TARGET_BASE_URL",
-        "https://hub.scanupload.net/api/front-end",
-    ),
-    route_prefix=_get_config_value(dotenv_values, "SCANUPLOAD_ROUTE_PREFIX", "/scanupload-api"),
-    token_route=_get_config_value(dotenv_values, "SCANUPLOAD_TOKEN_ROUTE", "/scanupload-api/token"),
-    strip_route_prefix=_get_config_value(
-        dotenv_values,
-        "SCANUPLOAD_STRIP_ROUTE_PREFIX",
-        "true",
-    ).lower()
-    in {"1", "true", "yes", "on"},
-    keycloak_server_url=_get_config_value(
-        dotenv_values,
-        "KEYCLOAK_SERVER_URL",
-        "https://identity.scanupload.net/",
-    ),
-    keycloak_realm=_get_config_value(dotenv_values, "KEYCLOAK_REALM", "scanupload-hub"),
-    keycloak_client_id=_get_config_value(dotenv_values, "KEYCLOAK_CLIENT_ID"),
-    keycloak_client_secret=_get_config_value(dotenv_values, "KEYCLOAK_CLIENT_SECRET"),
-    keycloak_scope=_get_config_value(
-        dotenv_values,
-        "KEYCLOAK_SCOPE",
-        "openid profile email scanupload.hub",
-    ),
-    api_client_base_url=_get_config_value(
-        dotenv_values,
-        "SCANUPLOAD_API_CLIENT_BASE_URL",
-        "https://hub.scanupload.net",
-    ),
-)
-
-_keycloak_client: KeycloakClient | None = None
-_token_provider: TokenProvider | None = None
-_api_client: ScanUploadApiClient | None = None
-
-
-@asynccontextmanager
-async def lifespan(app: Starlette):
-    """Initialize and clean up clients for app lifecycle."""
-    global _keycloak_client, _token_provider, _api_client
-
-    _keycloak_client = KeycloakClient(options)
-    _token_provider = TokenProvider(_keycloak_client, options)
-    _api_client = ScanUploadApiClient(
-        base_url=options.api_client_base_url,
-        token_provider=_token_provider,
+def _build_options() -> ScanUploadProxyOptions:
+    """Create ScanUpload configuration from .env and environment variables."""
+    dotenv_values = _load_dotenv_values()
+    return ScanUploadProxyOptions(
+        target_base_url=_get_config_value(
+            dotenv_values,
+            "SCANUPLOAD_TARGET_BASE_URL",
+            "https://hub.scanupload.net/api/front-end",
+        ),
+        route_prefix=_get_config_value(
+            dotenv_values,
+            "SCANUPLOAD_ROUTE_PREFIX",
+            "/scanupload-api",
+        ),
+        token_route=_get_config_value(
+            dotenv_values,
+            "SCANUPLOAD_TOKEN_ROUTE",
+            "/scanupload-api/token",
+        ),
+        strip_route_prefix=_get_config_value(
+            dotenv_values,
+            "SCANUPLOAD_STRIP_ROUTE_PREFIX",
+            "true",
+        ).lower()
+        in {"1", "true", "yes", "on"},
+        keycloak_server_url=_get_config_value(
+            dotenv_values,
+            "KEYCLOAK_SERVER_URL",
+            "https://identity.scanupload.net/",
+        ),
+        keycloak_realm=_get_config_value(
+            dotenv_values,
+            "KEYCLOAK_REALM",
+            "scanupload-hub",
+        ),
+        keycloak_client_id=_get_config_value(dotenv_values, "KEYCLOAK_CLIENT_ID"),
+        keycloak_client_secret=_get_config_value(dotenv_values, "KEYCLOAK_CLIENT_SECRET"),
+        keycloak_scope=_get_config_value(
+            dotenv_values,
+            "KEYCLOAK_SCOPE",
+            "openid profile email scanupload.hub",
+        ),
+        api_client_base_url=_get_config_value(
+            dotenv_values,
+            "SCANUPLOAD_API_CLIENT_BASE_URL",
+            "https://hub.scanupload.net",
+        ),
     )
-    app.state.scan_upload_token_provider = _token_provider
-
-    try:
-        yield
-    finally:
-        if _api_client:
-            await _api_client.close()
-        if _keycloak_client:
-            await _keycloak_client.close()
 
 
-async def root(_: Request) -> JSONResponse:
+def _require_token_provider(request: Request) -> TokenProvider:
+    token_provider = getattr(request.app.state, "scan_upload_token_provider", None)
+    if token_provider is None:
+        raise RuntimeError("Token provider not initialized")
+    return token_provider
+
+
+def _require_api_client(request: Request) -> ScanUploadApiClient:
+    api_client = getattr(request.app.state, "scan_upload_api_client", None)
+    if api_client is None:
+        raise RuntimeError("API client not initialized")
+    return api_client
+
+
+def create_app(options: ScanUploadProxyOptions | None = None) -> Starlette:
+    """Create a Starlette app that uses the published ScanUpload package."""
+    app_options = options or _build_options()
+
+    @asynccontextmanager
+    async def lifespan(app: Starlette):
+        keycloak_client = KeycloakClient(app_options)
+        token_provider = TokenProvider(keycloak_client, app_options)
+        api_client = ScanUploadApiClient(
+            base_url=app_options.api_client_base_url,
+            token_provider=token_provider,
+        )
+        app.state.scan_upload_keycloak_client = keycloak_client
+        app.state.scan_upload_token_provider = token_provider
+        app.state.scan_upload_api_client = api_client
+
+        try:
+            yield
+        finally:
+            await api_client.close()
+            await keycloak_client.close()
+
+    app = Starlette(
+        debug=True,
+        routes=[
+            Route("/", root),
+            Route("/health", health),
+            Route("/token", get_token),
+            Route("/download/{session_id}", download_session, methods=["GET"]),
+        ],
+        lifespan=lifespan,
+    )
+    app.state.scan_upload_options = app_options
+    app.add_middleware(ScanUploadProxyMiddleware, options=app_options)
+    return app
+
+
+async def root(request: Request) -> JSONResponse:
     """Root endpoint."""
-    return JSONResponse({"message": "ScanUpload Starlette example"})
+    return JSONResponse(
+        {
+            "message": "ScanUpload Starlette example",
+            "token_route": "/token",
+            "download_route": "/download/{session_id}",
+            "proxy_prefix": request.app.state.scan_upload_options.route_prefix,
+        }
+    )
 
 
-async def get_token(_: Request) -> JSONResponse:
+async def health(_: Request) -> JSONResponse:
+    """Health endpoint for app readiness checks."""
+    return JSONResponse({"status": "ok"})
+
+
+async def get_token(request: Request) -> JSONResponse:
     """Get an access token from the cached provider."""
-    if not _token_provider:
-        return JSONResponse({"detail": "Token provider not initialized"}, status_code=500)
-
     try:
-        token = await _token_provider.get_access_token()
+        token = await _require_token_provider(request).get_access_token()
         return JSONResponse(
             {
                 "access_token": token.access_token,
@@ -137,43 +198,34 @@ async def get_token(_: Request) -> JSONResponse:
 
 async def download_session(request: Request) -> JSONResponse:
     """Download files from a session using API client."""
-    if not _api_client:
-        return JSONResponse({"detail": "API client not initialized"}, status_code=500)
-
     session_id = request.path_params["session_id"]
     files: list[dict[str, object]] = []
 
     try:
+        api_client = _require_api_client(request)
+
         async def process_file(filename: str, content: bytes) -> None:
             files.append({"filename": filename, "size": len(content)})
 
-        await _api_client.download_async(session_id, process_file)
+        await api_client.download_async(session_id, process_file)
         return JSONResponse({"session_id": session_id, "files": files})
     except Exception as ex:
         return JSONResponse({"detail": str(ex)}, status_code=500)
 
 
-app = Starlette(
-    debug=True,
-    routes=[
-        Route("/", root),
-        Route("/token", get_token),
-        Route("/download/{session_id}", download_session, methods=["GET"]),
-    ],
-    lifespan=lifespan,
-)
-app.add_middleware(ScanUploadProxyMiddleware, options=options)
+app = create_app()
 
 
 if __name__ == "__main__":
     import uvicorn
 
+    dotenv_values = _load_dotenv_values()
     ssl_certfile = _get_config_value(dotenv_values, "UVICORN_SSL_CERTFILE")
     ssl_keyfile = _get_config_value(dotenv_values, "UVICORN_SSL_KEYFILE")
 
     run_kwargs = {
-        "host": "localhost",
-        "port": 7021,
+        "host": _get_config_value(dotenv_values, "UVICORN_HOST", "localhost"),
+        "port": int(_get_config_value(dotenv_values, "UVICORN_PORT", "7021")),
     }
     if ssl_certfile and ssl_keyfile:
         run_kwargs["ssl_certfile"] = ssl_certfile

@@ -40,12 +40,32 @@ pip install -e .[asgi]
 ```
 
 The example scripts in `examples/` load values from `.env` first, then fall back
-to terminal environment variables.
+to environment variables using this precedence:
+
+1. `SCANUPLOAD_DOTENV_PATH` (if set)
+2. `.env` in the current working directory
+3. `.env` in the repository root
+4. Terminal environment variables
 
 ## Run FastAPI Example
 
 ```bash
 python examples/fastapi_example.py
+```
+
+Default endpoint: `http://localhost:7021`
+
+To run with HTTPS on `https://localhost:7021`, provide both SSL files in `.env`:
+
+```ini
+UVICORN_SSL_CERTFILE=C:/path/to/localhost.pem
+UVICORN_SSL_KEYFILE=C:/path/to/localhost-key.pem
+```
+
+## Run Starlette Example
+
+```bash
+python examples/starlette_example.py
 ```
 
 Default endpoint: `http://localhost:7021`
