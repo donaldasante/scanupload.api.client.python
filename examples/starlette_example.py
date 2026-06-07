@@ -1,12 +1,14 @@
 """Reusable Starlette example built on the published ScanUpload client package."""
 
+import io
 import os
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from scan_upload_api_client import (
@@ -155,7 +157,7 @@ def create_app(options: ScanUploadProxyOptions | None = None) -> Starlette:
             Route("/", root),
             Route("/health", health),
             Route("/token", get_token),
-            Route("/download/{session_id}", download_session, methods=["GET"]),
+            Route("/download-file/{session_id}", download_session, methods=["GET"]),
         ],
         lifespan=lifespan,
     )
@@ -170,7 +172,7 @@ async def root(request: Request) -> JSONResponse:
         {
             "message": "ScanUpload Starlette example",
             "token_route": "/token",
-            "download_route": "/download/{session_id}",
+            "download_route": "/download-file/{session_id}",
             "proxy_prefix": request.app.state.scan_upload_options.route_prefix,
         }
     )
@@ -196,21 +198,42 @@ async def get_token(request: Request) -> JSONResponse:
         return JSONResponse({"detail": str(ex)}, status_code=500)
 
 
-async def download_session(request: Request) -> JSONResponse:
-    """Download files from a session using API client."""
+async def download_session(request: Request) -> Response:
+    """Download all session files as a zip archive."""
     session_id = request.path_params["session_id"]
-    files: list[dict[str, object]] = []
+    api_client = _require_api_client(request)
 
-    try:
-        api_client = _require_api_client(request)
+    output = io.BytesIO()
+    files_received = False
 
-        async def process_file(filename: str, content: bytes) -> None:
-            files.append({"filename": filename, "size": len(content)})
+    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        async def collect_file(filename: str, content: bytes) -> None:
+            nonlocal files_received
+            zf.writestr(filename, content)
+            files_received = True
 
-        await api_client.download_async(session_id, process_file)
-        return JSONResponse({"session_id": session_id, "files": files})
-    except Exception as ex:
-        return JSONResponse({"detail": str(ex)}, status_code=500)
+        try:
+            await api_client.download_async(session_id, collect_file)
+        except Exception as exc:
+            return JSONResponse(
+                {"detail": f"Failed to download from ScanUpload hub: {exc}"},
+                status_code=502,
+            )
+
+    if not files_received:
+        return JSONResponse(
+            {"detail": "No files found for this session."},
+            status_code=404,
+        )
+
+    output.seek(0)
+    return Response(
+        content=output.read(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{session_id}.zip"',
+        },
+    )
 
 
 app = create_app()

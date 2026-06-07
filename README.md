@@ -195,8 +195,9 @@ async def root():
 
 The reusable repository example in
 [examples/fastapi_example.py](examples/fastapi_example.py) follows the same
-pattern, adds `/token` and `/download/{session_id}` helper routes, and can be
-adapted directly into an existing FastAPI service.
+pattern, adds `/health`, `/token`, and `/download-file/{session_id}` helper
+routes (the download route returns all session files as a zip archive), and can
+be adapted directly into an existing FastAPI service.
 
 You can also integrate the middleware in Starlette:
 
@@ -244,8 +245,9 @@ app.add_middleware(ScanUploadProxyMiddleware, options=options)
 
 The reusable repository example in
 [examples/starlette_example.py](examples/starlette_example.py) follows the same
-pattern, adds `/health`, `/token`, and `/download/{session_id}` helper routes,
-and can be adapted directly into an existing Starlette service.
+pattern, adds `/health`, `/token`, and `/download-file/{session_id}` helper
+routes (the download route returns all session files as a zip archive), and can
+be adapted directly into an existing Starlette service.
 
 To run the full FastAPI example app from this repository:
 

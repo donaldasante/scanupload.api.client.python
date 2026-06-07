@@ -1,10 +1,12 @@
 """Reusable FastAPI example built on the published ScanUpload client package."""
 
+import io
 import os
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 
 from scan_upload_api_client import (
     KeycloakClient,
@@ -185,21 +187,41 @@ async def get_token(request: Request):
         raise HTTPException(status_code=500, detail=str(ex))
 
 
-@app.get("/download/{session_id}")
+@app.get("/download-file/{session_id}")
 async def download_session(session_id: str, request: Request):
-    """Download files from a session."""
-    try:
-        api_client = _require_api_client(request)
-        files = []
+    api_client: ScanUploadApiClient = _require_api_client(request)
 
-        async def process_file(filename: str, content: bytes):
-            files.append({"filename": filename, "size": len(content)})
+    output = io.BytesIO()
+    files_received = False
 
-        await api_client.download_async(session_id, process_file)
+    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        async def collect_file(filename: str, content: bytes) -> None:
+            nonlocal files_received
+            zf.writestr(filename, content)
+            files_received = True
 
-        return {"session_id": session_id, "files": files}
-    except Exception as ex:
-        raise HTTPException(status_code=500, detail=str(ex))
+        try:
+            await api_client.download_async(session_id, collect_file)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to download from ScanUpload hub: {exc}",
+            ) from exc
+
+    if not files_received:
+        raise HTTPException(
+            status_code=404,
+            detail="No files found for this session.",
+        )
+
+    output.seek(0)
+    return Response(
+        content=output.read(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{session_id}.zip"',
+        },
+    )
 
 
 if __name__ == "__main__":
