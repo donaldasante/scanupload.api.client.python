@@ -1,8 +1,10 @@
-# ScanUpload API Client - Python Integration Guide
+# Introduction
 
 [ScanUpload](https://app.scanupload.net/) enables the integration and the
 ability to use QR codes to scan and upload files directly from a mobile device
 to your webapp.
+
+# ScanUpload API Client - Python Integration Guide
 
 This guide explains how to integrate **scan-upload-api-client** into a Python
 application. The client library requires **Python 3.11+** and is compatible
