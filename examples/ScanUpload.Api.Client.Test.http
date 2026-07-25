@@ -1,0 +1,23 @@
+### Variables
+@ScanUpload.Api.Client.Test_HostAddress = https://localhost:7021
+@sessionId = a8enGTqb_I0V5XZUI6UzuQq6h5irGGOSZ66MIZUxOoA
+
+### Direct Keycloak call (bypasses cache)
+GET {{ScanUpload.Api.Client.Test_HostAddress}}/token
+Accept: application/json
+
+### Cached token (refreshed only when expired)
+GET {{ScanUpload.Api.Client.Test_HostAddress}}/cached-token
+Accept: application/json
+
+### Download a session's zipped file bundle
+GET {{ScanUpload.Api.Client.Test_HostAddress}}/download-file/{{sessionId}}
+Accept: application/octet-stream
+
+### Liveness probe
+GET {{ScanUpload.Api.Client.Test_HostAddress}}/health
+Accept: application/json
+
+### Endpoint catalogue
+GET {{ScanUpload.Api.Client.Test_HostAddress}}/
+Accept: application/json

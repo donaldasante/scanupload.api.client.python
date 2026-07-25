@@ -1,25 +1,29 @@
 """ScanUpload API Client for Python.
 
-This package provides Python bindings for the ScanUpload API, including:
-- Keycloak authentication and token management
-- API client for file downloads
-- Proxy service for web frameworks
+This package provides Python bindings for the ScanUpload API:
+- Client-credentials authentication against Keycloak
+- Cached bearer token acquisition
+- File download from a ScanUpload session
+
+The bearer tokens obtained via ``KeycloakClient``/``TokenProvider`` are only
+authorised for the ``download-session`` endpoint - no other endpoint is
+exposed by this client.
 """
 
-from .exceptions import KeycloakException, ScanUploadProxyException
+from .api_client import ScanUploadApiClient, ZipEntryStream
+from .exceptions import KeycloakException
 from .keycloak_client import KeycloakClient
-from .options import ScanUploadProxyOptions
+from .options import ScanUploadOptions
 from .token_provider import TokenProvider
 from .token_response import TokenResponse
-from .api_client import ScanUploadApiClient
 
-__version__ = "0.1.0a3"
+__version__ = "1.0.0"
 __all__ = [
     "KeycloakException",
-    "ScanUploadProxyException",
     "KeycloakClient",
-    "ScanUploadProxyOptions",
+    "ScanUploadOptions",
     "TokenProvider",
     "TokenResponse",
     "ScanUploadApiClient",
+    "ZipEntryStream",
 ]

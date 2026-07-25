@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 
 from .exceptions import KeycloakException
-from .options import ScanUploadProxyOptions
+from .options import ScanUploadOptions
 from .token_response import TokenResponse
 
 
@@ -15,7 +15,7 @@ class KeycloakClient:
 
     def __init__(
         self,
-        options: ScanUploadProxyOptions,
+        options: ScanUploadOptions,
         http_client: httpx.AsyncClient | None = None,
     ):
         """Initialize the Keycloak client.

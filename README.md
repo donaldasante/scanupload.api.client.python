@@ -1,290 +1,147 @@
-# Introduction
+# ScanUpload API Client - Python
 
-[ScanUpload](https://app.scanupload.net/) enables the integration and the
-ability to use QR codes to scan and upload files directly from a mobile device
-to your webapp.
+Get a bearer token from [ScanUpload](https://app.scanupload.net/) using a
+client ID + secret, then download the files captured for a session.
+Two API methods, zero web-framework dependencies.
 
-# ScanUpload API Client - Python Integration Guide
+## Quickstart
 
-This guide explains how to integrate **scan-upload-api-client** into a Python
-application. The client library requires **Python 3.11+** and is compatible
-with:
+1. **Get your client credentials** from the
+   [ScanUpload Dashboard](https://app.scanupload.net/dashboard):
+   1. Sign in to [app.scanupload.net](https://app.scanupload.net/).
+   2. On the dashboard, enter your **company name** and **website URL**, then click **Save**.
+   3. Open the **client credentials** section and click **Generate** to mint a client ID + secret.
+   4. The dashboard will also show your `KEYCLOAK_SERVER_URL` and `KEYCLOAK_REALM` — copy them too.
 
-- FastAPI
-- Starlette
-- Django (with async views)
-- Flask (with async support)
-- Any ASGI application
+2. **Install** the client:
 
-## Prerequisites
+   ```sh
+   pip install scan-upload-api-client
+   ```
 
-- Python 3.11+
-- [A ScanUpload account](https://app.scanupload.net/)
-- A ScanUpload **Client ID** and **Client Secret**
+3. **Configure** it (env vars or a `.env` file):
 
-## Installation
+   ```ini
+   KEYCLOAK_SERVER_URL=https://identity.scanupload.net/
+   KEYCLOAK_REALM=scanupload-hub
+   KEYCLOAK_CLIENT_ID=<paste from the dashboard>
+   KEYCLOAK_CLIENT_SECRET=<paste from the dashboard>
+   HUB_BASE_URL=https://hub.scanupload.net
+   ```
 
-```sh
-pip install scan-upload-api-client
-```
+4. **Download a session** in 7 lines:
 
-If you want to pin to a specific release:
+   ```python
+   import asyncio
+   from scan_upload_api_client import (
+       KeycloakClient, ScanUploadApiClient, ScanUploadOptions, TokenProvider,
+   )
 
-```sh
-pip install scan-upload-api-client==1.0.0
-```
+   async def main():
+       opts = ScanUploadOptions()  # reads the KEYCLOAK_* env vars above
+       async with KeycloakClient(opts) as kc:
+           tp = TokenProvider(kc, opts)
+           api = ScanUploadApiClient("https://hub.scanupload.net", tp)
+           async def save(name, content):
+               open(f"downloads/{name}", "wb").write(content)
+           await api.download_async("your-session-id", save)
 
-For ASGI/web framework integration:
+   asyncio.run(main())
+   ```
 
-```sh
-pip install scan-upload-api-client[asgi]
-```
+That's the whole thing. See
+[`examples/quickstart.py`](examples/quickstart.py) for the runnable
+version.
 
-## Configuration
+> **Never commit `KEYCLOAK_CLIENT_SECRET` to source control.** Use a
+> secrets manager or your CI/CD provider's secret store.
 
-Configure using environment variables or a `.env` file:
+## Configuration reference
 
-```ini
-SCANUPLOAD_TARGET_BASE_URL=https://hub.scanupload.net/api/front-end
-SCANUPLOAD_ROUTE_PREFIX=/scanupload-api
-SCANUPLOAD_TOKEN_ROUTE=/scanupload-api/token
-SCANUPLOAD_STRIP_ROUTE_PREFIX=true
-SCANUPLOAD_REQUEST_TIMEOUT=90
+`ScanUploadOptions` reads from environment variables (or `.env`).
+Booleans default to `False`, strings default to `""`, durations default
+to `timedelta(seconds=60)`, unless noted:
 
-SCANUPLOAD_API_CLIENT_BASE_URL=https://hub.scanupload.net
+| Field | Env var | Purpose |
+| --- | --- | --- |
+| `keycloak_server_url` | `KEYCLOAK_SERVER_URL` | Base URL of your Keycloak server |
+| `keycloak_realm` | `KEYCLOAK_REALM` | Realm that hosts this client |
+| `keycloak_client_id` | `KEYCLOAK_CLIENT_ID` | Client ID for the credentials grant |
+| `keycloak_client_secret` | `KEYCLOAK_CLIENT_SECRET` | Client secret for the credentials grant |
+| `keycloak_scope` | `KEYCLOAK_SCOPE` | Optional OAuth2 scope (`openid profile email scanupload.hub` works for the hosted SaaS) |
+| `keycloak_early_refresh_seconds` | n/a | Refresh margin before token expiry (default `120`) |
 
-KEYCLOAK_SERVER_URL=https://identity.scanupload.net/
-KEYCLOAK_REALM=scanupload-hub
-KEYCLOAK_CLIENT_ID=your-client-id
-KEYCLOAK_CLIENT_SECRET=your-client-secret
-KEYCLOAK_SCOPE=openid profile email scanupload.hub
-
-# Optional: enable HTTPS for FastAPI example
-UVICORN_SSL_CERTFILE=C:/path/to/localhost.pem
-UVICORN_SSL_KEYFILE=C:/path/to/localhost-key.pem
-```
-
-The example apps in `examples/` load configuration in this order:
-
-1. `SCANUPLOAD_DOTENV_PATH` (if set)
-2. `.env` in the current working directory
-3. `.env` in the repository root
-4. Terminal environment variables
-
-WARNING: **Never commit secrets to source control.** Use environment variables
-or a secrets management system.
-
-## Basic Usage
-
-### Keycloak Token Client
+To pass values directly instead of from env vars:
 
 ```python
-import asyncio
-from scan_upload_api_client import KeycloakClient, ScanUploadProxyOptions
-
-async def main():
-    options = ScanUploadProxyOptions(
-        keycloak_server_url="https://identity.scanupload.net/",
-        keycloak_realm="scanupload-hub",
-        keycloak_client_id="your-client-id",
-        keycloak_client_secret="your-client-secret",
-    )
-
-    async with KeycloakClient(options) as client:
-        token = await client.get_client_credentials_token()
-        print(f"Access token: {token.access_token}")
-
-asyncio.run(main())
-```
-
-### Token Provider with Caching
-
-```python
-from scan_upload_api_client import TokenProvider, KeycloakClient, ScanUploadProxyOptions
-
-async def main():
-    options = ScanUploadProxyOptions(
-        keycloak_server_url="https://identity.scanupload.net/",
-        keycloak_realm="scanupload-hub",
-        keycloak_client_id="your-client-id",
-        keycloak_client_secret="your-client-secret",
-        keycloak_early_refresh_seconds=120,
-    )
-
-    async with KeycloakClient(options) as keycloak_client:
-        provider = TokenProvider(keycloak_client, options)
-
-        # First call fetches token
-        token1 = await provider.get_access_token()
-
-        # Second call uses cache
-        token2 = await provider.get_access_token()
-
-        assert token1.access_token == token2.access_token
-
-asyncio.run(main())
-```
-
-### Download Files
-
-```python
-from scan_upload_api_client import ScanUploadApiClient, TokenProvider
-
-async def main():
-    # Setup token provider...
-    api_client = ScanUploadApiClient(
-        base_url="https://hub.scanupload.net",
-        token_provider=provider,
-    )
-
-    async def process_file(filename: str, content: bytes):
-        print(f"Processing {filename} ({len(content)} bytes)")
-        # Save or process file content
-
-    await api_client.download_async("session-id-123", process_file)
-
-asyncio.run(main())
-```
-
-## Framework Integration
-
-If you are consuming the package from PyPI, install the ASGI extras first:
-
-```sh
-pip install "scan-upload-api-client[asgi]"
-```
-
-Then create your FastAPI app with the published package:
-
-```python
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
-from scan_upload_api_client import (
-    KeycloakClient,
-    ScanUploadProxyOptions,
-    TokenProvider,
-)
-from scan_upload_api_client.middleware import ScanUploadProxyMiddleware
-
-options = ScanUploadProxyOptions(
-    target_base_url="https://hub.scanupload.net/api/front-end",
-    route_prefix="/scanupload-api",
-    token_route="/scanupload-api/token",
-    strip_route_prefix=True,
+options = ScanUploadOptions(
     keycloak_server_url="https://identity.scanupload.net/",
     keycloak_realm="scanupload-hub",
-    keycloak_client_id="your-client-id",
-    keycloak_client_secret="your-client-secret",
+    keycloak_client_id="...",
+    keycloak_client_secret="...",
 )
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    keycloak_client = KeycloakClient(options)
-    token_provider = TokenProvider(keycloak_client, options)
-    app.state.scan_upload_token_provider = token_provider
-    try:
-        yield
-    finally:
-        await keycloak_client.close()
-
-app = FastAPI(title="ScanUpload FastAPI Example", lifespan=lifespan)
-app.add_middleware(ScanUploadProxyMiddleware, options=options)
-
-@app.get("/")
-async def root():
-    return {"message": "ScanUpload API client is active"}
 ```
 
-The reusable repository example in
-[examples/fastapi_example.py](examples/fastapi_example.py) follows the same
-pattern, adds `/health`, `/token`, and `/download-file/{session_id}` helper
-routes (the download route returns all session files as a zip archive), and can
-be adapted directly into an existing FastAPI service.
+## Streaming entries straight to disk
 
-You can also integrate the middleware in Starlette:
+If you don't want to buffer each zip entry in memory before writing it,
+swap `download_async` for `download_async_streaming`. The callback
+receives a `ZipEntryStream` you can drain chunk by chunk:
 
 ```python
-from contextlib import asynccontextmanager
+from scan_upload_api_client import ZipEntryStream
 
-from starlette.applications import Starlette
-from starlette.responses import JSONResponse
-from starlette.routing import Route
+async def stream_to_disk(name: str, entry: ZipEntryStream) -> None:
+    with open(f"downloads/{name}", "wb") as fh:
+        async for chunk in entry.read_chunks():  # 64 KiB by default
+            fh.write(chunk)
 
-from scan_upload_api_client import (
-    KeycloakClient,
-    ScanUploadProxyOptions,
-    TokenProvider,
-)
-from scan_upload_api_client.middleware import ScanUploadProxyMiddleware
-
-options = ScanUploadProxyOptions(
-    target_base_url="https://hub.scanupload.net/api/front-end",
-    route_prefix="/scanupload-api",
-    token_route="/scanupload-api/token",
-    strip_route_prefix=True,
-    keycloak_server_url="https://identity.scanupload.net/",
-    keycloak_realm="scanupload-hub",
-    keycloak_client_id="your-client-id",
-    keycloak_client_secret="your-client-secret",
-)
-
-async def root(_):
-    return JSONResponse({"message": "ScanUpload API client is active"})
-
-@asynccontextmanager
-async def lifespan(app: Starlette):
-    keycloak_client = KeycloakClient(options)
-    token_provider = TokenProvider(keycloak_client, options)
-    app.state.scan_upload_token_provider = token_provider
-    try:
-        yield
-    finally:
-        await keycloak_client.close()
-
-app = Starlette(routes=[Route("/", root)], lifespan=lifespan)
-app.add_middleware(ScanUploadProxyMiddleware, options=options)
+await api.download_async_streaming("your-session-id", stream_to_disk)
 ```
 
-The reusable repository example in
-[examples/starlette_example.py](examples/starlette_example.py) follows the same
-pattern, adds `/health`, `/token`, and `/download-file/{session_id}` helper
-routes (the download route returns all session files as a zip archive), and can
-be adapted directly into an existing Starlette service.
+## HTTP integration test (optional)
 
-To run the full FastAPI example app from this repository:
+[`examples/integration_test.py`](examples/integration_test.py) is a
+small FastAPI app that hosts the client behind HTTP, mirroring the .NET
+`ScanUpload.Api.Client.Test` sample. It exposes `/token`,
+`/cached-token`, `/download-file/{session_id}`, `/health`, and `/`
+on `http(s)://localhost:7021`. Pre-baked VS Code REST Client scenarios
+live in
+[`examples/ScanUpload.Api.Client.Test.http`](examples/ScanUpload.Api.Client.Test.http).
 
 ```sh
-pip install -e .[asgi]
-python examples/fastapi_example.py
+pip install -e .[integration-test]
+python examples/integration_test.py
 ```
 
-To run the full Starlette example app from this repository:
+## API at a glance
+
+| Symbol | Purpose |
+| --- | --- |
+| `ScanUploadOptions` | Configuration container |
+| `KeycloakClient` | Performs the OAuth2 client-credentials grant |
+| `TokenProvider` | Caches tokens and refreshes them on demand |
+| `ScanUploadApiClient` | Downloads a session's files |
+| `download_async(id, cb)` | cb receives `(name, bytes)` per entry |
+| `download_async_streaming(id, cb)` | cb receives `(name, ZipEntryStream)` per entry |
+| `ZipEntryStream` | Async-friendly view over a zip entry body |
+| `TokenResponse` | OAuth2 token response model |
+| `KeycloakException` | Raised for any Keycloak/auth failure |
+
+## Running tests
 
 ```sh
-pip install -e .[asgi]
-python examples/starlette_example.py
-```
-
-By default, the example runs on `http://localhost:7021`. If both
-`UVICORN_SSL_CERTFILE` and `UVICORN_SSL_KEYFILE` are set, it runs on
-`https://localhost:7021`.
-
-## Running Tests
-
-```sh
-# Install test dependencies
 pip install -e .[test]
-
-# Run tests
 pytest
 ```
 
-## Compatibility Notes
+## Compatibility
 
-- Requires Python 3.11+
-- Fully async (uses `httpx.AsyncClient`)
+- Python 3.11+
+- Fully async (`httpx.AsyncClient`)
 - Thread-safe token caching
-- Compatible with FastAPI, Starlette, Django, Flask
+- Zero web-framework dependencies — works in FastAPI, Starlette, Django
+  async views, Flask, plain asyncio, etc.
 
 ## License
 

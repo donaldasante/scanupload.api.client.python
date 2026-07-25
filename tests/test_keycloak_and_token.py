@@ -8,30 +8,30 @@ import pytest
 from scan_upload_api_client import (
     KeycloakClient,
     KeycloakException,
-    ScanUploadProxyException,
-    ScanUploadProxyOptions,
+    ScanUploadOptions,
     TokenProvider,
     TokenResponse,
 )
 from tests.test_doubles import FakeKeycloakClient, FakeTransport, create_response
 
 
-def valid_options() -> ScanUploadProxyOptions:
+def valid_options(**overrides: object) -> ScanUploadOptions:
     """Create valid options for testing."""
-    return ScanUploadProxyOptions(
-        keycloak_server_url="https://kc.local",
-        keycloak_realm="realm-a",
-        keycloak_client_id="client-a",
-        keycloak_client_secret="secret-a",
-        keycloak_timeout=timedelta(seconds=5),
-    )
+    values: dict[str, object] = {
+        "keycloak_server_url": "https://kc.local",
+        "keycloak_realm": "realm-a",
+        "keycloak_client_id": "client-a",
+        "keycloak_client_secret": "secret-a",
+        "keycloak_timeout": timedelta(seconds=5),
+    }
+    values.update(overrides)
+    return ScanUploadOptions(**values)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
 async def test_keycloak_client_returns_token_on_success():
     """Test that KeycloakClient returns a token on successful authentication."""
-    options = valid_options()
-    options.keycloak_scope = "openid"
+    options = valid_options(keycloak_scope="openid")
 
     json_data = {"access_token": "abc", "expires_in": 300, "token_type": "bearer"}
 
@@ -98,6 +98,18 @@ async def test_keycloak_client_throws_on_invalid_json():
     await sut.close()
 
 
+def test_keycloak_client_validates_required_fields():
+    """Test that KeycloakClient raises on missing required fields."""
+    bad_options = ScanUploadOptions(
+        keycloak_server_url="https://kc.local",
+        keycloak_realm="",
+        keycloak_client_id="client-a",
+        keycloak_client_secret="secret-a",
+    )
+    with pytest.raises(ValueError, match="Keycloak Realm is required"):
+        KeycloakClient(bad_options)
+
+
 @pytest.mark.asyncio
 async def test_token_provider_uses_cache_when_valid():
     """Test that TokenProvider caches valid tokens."""
@@ -106,7 +118,7 @@ async def test_token_provider_uses_cache_when_valid():
     )
 
     fake = FakeKeycloakClient(lambda: token)
-    options = ScanUploadProxyOptions(keycloak_early_refresh_seconds=60)
+    options = ScanUploadOptions(keycloak_early_refresh_seconds=60)
 
     sut = TokenProvider(fake, options)
 
@@ -132,7 +144,7 @@ async def test_token_provider_refreshes_when_expired():
         )
 
     fake = FakeKeycloakClient(factory)
-    options = ScanUploadProxyOptions(keycloak_early_refresh_seconds=120)
+    options = ScanUploadOptions(keycloak_early_refresh_seconds=120)
 
     sut = TokenProvider(fake, options)
 
@@ -152,9 +164,7 @@ def test_token_response_is_expired_and_is_success():
     )
 
     assert ok.is_success
-    assert not ok.is_expired(
-        0, ok.received_at_utc + timedelta(seconds=299)
-    )
+    assert not ok.is_expired(0, ok.received_at_utc + timedelta(seconds=299))
     assert ok.is_expired(0, ok.received_at_utc + timedelta(seconds=300))
     assert ok.is_expired(120, ok.received_at_utc + timedelta(seconds=181))
 
@@ -162,9 +172,9 @@ def test_token_response_is_expired_and_is_success():
     assert not err.is_success
 
 
-def test_proxy_options_keycloak_token_endpoint():
+def test_options_keycloak_token_endpoint():
     """Test that token endpoint URL is built correctly."""
-    options = ScanUploadProxyOptions(
+    options = ScanUploadOptions(
         keycloak_server_url="https://kc.local/",
         keycloak_realm="realm-a",
     )
@@ -175,16 +185,40 @@ def test_proxy_options_keycloak_token_endpoint():
     )
 
 
-def test_exception_constructors():
-    """Test that exception constructors set properties correctly."""
+def test_options_loads_from_env(monkeypatch: pytest.MonkeyPatch):
+    """Test that ScanUploadOptions reads from environment variables."""
+    monkeypatch.setenv("KEYCLOAK_SERVER_URL", "https://kc.example.com")
+    monkeypatch.setenv("KEYCLOAK_REALM", "realm-env")
+    monkeypatch.setenv("KEYCLOAK_CLIENT_ID", "client-env")
+    monkeypatch.setenv("KEYCLOAK_CLIENT_SECRET", "secret-env")
+
+    options = ScanUploadOptions()
+    assert options.keycloak_server_url == "https://kc.example.com"
+    assert options.keycloak_realm == "realm-env"
+    assert options.keycloak_client_id == "client-env"
+    assert options.keycloak_client_secret == "secret-env"
+
+
+def test_options_validates_client_id_secret_pair():
+    """Test that ScanUploadOptions enforces client id/secret pairing."""
+    with pytest.raises(ValueError):
+        ScanUploadOptions(
+            keycloak_client_id="x",
+            keycloak_client_secret="",
+        )
+    with pytest.raises(ValueError):
+        ScanUploadOptions(
+            keycloak_client_id="",
+            keycloak_client_secret="y",
+        )
+
+
+def test_exception_constructor():
+    """Test that KeycloakException constructor sets properties correctly."""
     inner = ValueError("x")
-
-    kc = KeycloakException("message-a", error_code="code-a", status_code=401)
-    assert kc.error_code == "code-a"
-    assert kc.status_code == 401
-
-    px = ScanUploadProxyException(
-        "message-b", error_code="code-b", inner_exception=inner
+    exc = KeycloakException(
+        "message", error_code="code", status_code=401, inner_exception=inner
     )
-    assert px.error_code == "code-b"
-    assert px.inner_exception is inner
+    assert exc.error_code == "code"
+    assert exc.status_code == 401
+    assert exc.inner_exception is inner

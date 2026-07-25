@@ -3,7 +3,7 @@
 import asyncio
 from typing import TYPE_CHECKING
 
-from .options import ScanUploadProxyOptions
+from .options import ScanUploadOptions
 from .token_response import TokenResponse
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 class TokenProvider:
     """Provides cached access tokens with automatic refresh."""
 
-    def __init__(self, keycloak_client: "KeycloakClient", options: ScanUploadProxyOptions):
+    def __init__(self, keycloak_client: "KeycloakClient", options: ScanUploadOptions):
         """Initialize the token provider.
 
         Args:
